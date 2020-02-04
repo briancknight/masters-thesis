@@ -17,7 +17,9 @@ def Taylor08(target, base, window):
 
 	(Ax, Ay, Iz, b, Dx, Dy) = getConstraintCoeffs(target, base, window, k, sigma, px, py)
 
-	return (Ax, Ay, Iz, b, Dx, Dy)
+	deformedIm = gaussianDeformImage(target, sigma, k, px, py)
+
+	return (deformedIm, Ax, Ay, Iz, b, Dx, Dy)
 
 
 def getConstraintCoeffs(target, base, window, k, sigma, px, py):
