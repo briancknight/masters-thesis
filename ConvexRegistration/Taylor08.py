@@ -1,28 +1,30 @@
 from imTools import *
 from scipy.spatial import ConvexHull
 from convexHullPlot import plotLowerHull
+from deformationFunctions import *
 import cvxpy as cvx
 
 
-def Taylor08(target, base, window):
+def Taylor08(target, base, window, px, py):
 	"""target, deformed, m x n x 3 RGB images"""
 	(m,n, _ ) = target.shape
 
-	px = np.random.random(19)
-	py = np.random.random(19)
+	# px = np.random.random(19)
+	# py = np.random.random(19)
 
 	window = 10
 	k = 4 # 16 kernels
 	sigma = 10
 
-	(Ax, Ay, Iz, b, Dx, Dy) = getConstraintCoeffs(target, base, window, k, sigma, px, py)
+	(Ax, Ay, Iz, b, Dx, Dy, C) = getConstraintCoeffs(target, base, window, k, sigma, px, py)
 
 	deformedIm = gaussianDeformImage(target, sigma, k, px, py)
 
-	return (deformedIm, Ax, Ay, Iz, b, Dx, Dy)
+	return (deformedIm, Ax, Ay, Iz, b, Dx, Dy, C)
 
 
 def getConstraintCoeffs(target, base, window, k, sigma, px, py):
+	# Currently Structured for a Gaussian Deformation Model
 
 	(m, n, _) = target.shape
 	# initializing coefficient matrices & vectors
@@ -32,16 +34,21 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 	b = []
 	Dx = []
 	Dy = []
-
+	C = []
 	kernels = getKernels((m, n), k)
 
 	for x in range(m):
 		for y in range(n):
-			dx = gaussianD((x,y), kernels, sigma, px)
-			dy = gaussianD((x,y), kernels, sigma, py)
+			# Get deformation basis function values
+			c = gaussianD((x,y), kernels, sigma)
+			# Calculate deformation at x, y
+			dx = int(round(np.dot(c, px)))
+			dy = int(round(np.dot(c, py)))
 
+			# Check if within base image range:
 			if ((x + dx)*(y + dy) > 0) and (dx + x < m) and (dy + y< n):
 
+				# Contructs Error Surface
 				errorSurface = []
 
 				for i in range(-window, window):
@@ -53,7 +60,7 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 
 						except: IndexError
 
-				if len(errorSurface) > 4:
+				if len(errorSurface) > 4: # Check we have enough points
 					errorSurface = np.array(errorSurface)
 
 					hull = ConvexHull(points = errorSurface)
@@ -61,6 +68,7 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 					Ax1 = []
 					Ay1 = []
 					Iz1 = []
+					# Get lower planar facet coefficients
 					for i in range(len(hull.simplices)):
 
 						if hull.equations[i][2] < 0:
@@ -71,7 +79,7 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 							
 							Ax1.append(ax)
 							Ay1.append(ay)
-							Iz1.append(az)
+							Iz1.append(1)
 							b.append(dist)
 
 					Ax.append(Ax1)
@@ -79,6 +87,7 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 					Iz.append(Iz1)
 					Dx.append(dx)
 					Dy.append(dy)
+					C.append(c)
 
 	Ax = coeffMatFormat(Ax)
 	Ay = coeffMatFormat(Ay)
@@ -86,8 +95,9 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 	b = np.array(b)
 	Dx = np.array(Dx)
 	Dy = np.array(Dy)
+	C = np.array(C)
 
-	return (Ax, Ay, Iz, b, Dx, Dy)
+	return (Ax, Ay, Iz, b, Dx, Dy, C)
 
 
 def coeffMatFormat(mat):
@@ -109,115 +119,20 @@ def coeffMatFormat(mat):
 	return np.array(A)
 
 
-def getKernels(dims, k):
-	"""
-	im should be a numpy array, this returns evenly
-	distributed seed points for segmentation algorithms
+def getHessians(Ax, Ay, C, s):
 
-	returns n^2 seeds, evently distributed in im
-	"""
-	(m, n) = dims
+	# Work in progress... 4 more D_i's to go!
+	
+	D1 = Ax.T@np.diag(1/s**2)@Ax
+	D2 = Ay.T@np.diag(1/s**2)@Ay
 
-	if k**2 > max(m, n):
-		raise Exception('Image too small for this many kernels')
+	Hpx = C.T@D1@C
+	Hpy = C.T@D1@C
 
-	kernels = []
+	HalfHp = np.concat((Hpx, Hpy), axis = 1)
 
-	if k == 1:
-		kernel = (int(np.floor(m / 2)), int(np.floor(n / 2)))
-		kernels.append(kernel)
+	return HalfHp
 
-		return kernels
-
-	else:
-		xStart = np.floor(m / k)
-		xEnd = m - xStart
-
-		yStart = np.floor(n / k)
-		yEnd = n - yStart
-
-		x = np.linspace(xStart, xEnd, k).astype(int)
-		y = np.linspace(yStart, yEnd, k).astype(int)
-
-		grid, _ = np.meshgrid(x, y)
-
-		for i in range(k):
-			for j in range(k):
-
-				kernels.append((grid[0][i], grid[0][j]))
-
-		return kernels
-
-def secondOrderD(pix, p):
-
-	(x,y) = pix
-	C = np.array([1, x, y, x*y, x**2, y**2])
-	# D = np.dot(C, p)
-
-	return int(round(np.dot(C, p)))
-
-def gaussianD(pix, kernels, sigma, p):
-
-	(x, y) = pix
-
-	C = [1, x, y]
-
-	for kernel in kernels:
-		r = np.linalg.norm(np.array([x, y]) -  np.array(kernel), 2)
-		C.append(np.exp(-r/(sigma**2)))
-
-	# D = np.dot(C, p)
-
-	return int(round(np.dot(C, p)))
-
-
-def secondOrderDeformImage(im, px, py):
-
-	(m,n, _) = base.shape
-
-	defomredIm = np.zeros([m, n, 3])
-
-	def secondOrderD(pix, p):
-
-		(x,y) = pix
-		C = np.array([1, x, y, x*y, x**2, y**2])
-		# D = np.dot(C, p)
-
-		return int(round(np.dot(C, p)))
-
-	for i in range(m):
-		for j in range(n):
-			# (Dx, Dy) = firstOrderD((i,j), px, py)
-			Dx = secondOrderD((i, j), px)
-			Dy = secondOrderD((i, j), py)
-
-			try:
-				deformedIm[x + Dx, y + Dy] = im[i,j]
-			except: IndexError
-
-	return deformedIm.astype(int)
-
-
-def gaussianDeformImage(im, sigma, k, px, py):
-
-	(m,n, _) = im.shape
-
-	kernels = getKernels((m,n), k)
-
-	deformedIm = np.zeros([m, n, 3])
-
-	for i in range(m):
-		for j in range(n):
-
-			Dx = gaussianD((i, j), kernels, sigma, px)
-			Dy = gaussianD((i, j), kernels, sigma, py)
-
-			try:
-				deformedIm[i + Dx, j + Dy] = im[i,j]
-
-			except: IndexError
-
-	return deformedIm.astype(int)
 
 
 
@@ -233,12 +148,7 @@ def main():
 	plt.imshow(gaussianDeformImage(base, target, px, py))
 	plt.show()
 
-	Taylor08(target, base, 10)
-	# (A, B) = getConstraints(target, base, 5, 4, px, py)
-
-	# print(A[1])
-	# print("\n\n\n\n")
-	# print(B)
+	Taylor08(target, base, 10, px, py)
 
 if __name__ == '__main__':
 	main()
