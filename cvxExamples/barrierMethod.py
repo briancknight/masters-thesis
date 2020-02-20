@@ -85,7 +85,7 @@ def ineqNewtonStep(A, b, c, x):
 	    # w = np.linalg.solve(A @ np.diag(x**2) @ A.T, -1*A @ np.diag(x**2) @ g)
 	    # dx = -1 * np.diag(x**2) @ (A.T @ w + g)
 	    dx = -1 * np.linalg.inv(H) @ g 
-	    print(dx)
+	    # print(dx)
 
 	    lambdasqr = -1*g.T @ dx
 	    lambda_hist.append(lambdasqr/2)
