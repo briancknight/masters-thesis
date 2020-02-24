@@ -6,6 +6,12 @@ def secondOrderD(pix):
 	# C = np.array([1, x, y, x*y, x**2, y**2])
 	return np.array([1, x, y, x*y, x**2, y**2])
 
+def firstOrderD(pix):
+
+	(x,y) = pix
+
+	return np.array([1, x, y])
+
 def gaussianD(pix, kernels, sigma):
 
 	(x, y) = pix
@@ -22,22 +28,39 @@ def gaussianD(pix, kernels, sigma):
 
 def secondOrderDeformImage(im, px, py):
 
-	(m,n, _) = base.shape
+	(m,n, _) = im.shape
 
-	defomredIm = np.zeros([m, n, 3])
+	deformedIm = np.zeros([m, n, 3])
 
 	for i in range(m):
 		for j in range(n):
-			c = secondOrderD(pix)
+			c = secondOrderD((i,j))
 			Dx = int(round(np.dot(c, px)))
 			Dy = int(round(np.dot(c, py)))
 
 			try:
-				deformedIm[x + Dx, y + Dy] = im[i,j]
+				deformedIm[i + Dx, j + Dy] = im[i,j]
 			except: IndexError
 
 	return deformedIm.astype(int)
 
+def firstOrderDeformImage(im, px, py):
+
+	(m, n, _) = im.shape
+
+	deformedIm = np.zeros([m, n, 3])
+
+	for i in range(m):
+		for j in range(n):
+			c = firstOrderD((i,j))
+			Dx = int(round(np.dot(c, px)))
+			Dy = int(round(np.dot(c, py)))
+
+			try:
+				deformedIm[i + Dx, j + Dy] = im[i,j]
+			except: IndexError
+
+	return deformedIm.astype(int)
 
 def gaussianDeformImage(im, sigma, k, px, py):
 

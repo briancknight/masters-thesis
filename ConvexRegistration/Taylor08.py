@@ -4,6 +4,7 @@ from scipy import sparse
 from convexHullPlot import plotLowerHull
 from deformationFunctions import *
 import cvxpy as cvx
+import time
 
 
 def Taylor08(target, base, window, px, py):
@@ -17,11 +18,10 @@ def Taylor08(target, base, window, px, py):
 	"""
 	(m,n, _ ) = target.shape
 
-	window = 10
 	k = 4 # 16 kernels
 	sigma = 10
 
-	(Ax, Ay, Iz, b, Dx, Dy, C) = getConstraintCoeffs(target, base, window, k, sigma, px, py)
+	(deformedIm, Ax, Ay, Iz, b, Dx, Dy, C) = getConstraintCoeffs(target, base, window, k, sigma, px, py)
 
 	# A = (Ax @ C @ px) + (Ay @ C @ py) - z
 
@@ -31,124 +31,33 @@ def Taylor08(target, base, window, px, py):
 
 	# (Hp, Hz, D6) = getHessians(Ax, Ay, Iz, C, d2)
 
-	deformedIm = gaussianDeformImage(target, sigma, k, px, py)
-
 	return (deformedIm, Ax, Ay, Iz, b, Dx, Dy, C)
 
 
+# Marginally improved.
 def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 	# Currently Structured for a Gaussian Deformation Model
-
+	start = time.time()
+	print("Getting Coefficients...")
+	# deformedIm = gaussianDeformImage(base, sigma, k, px, py)
+	deformedIm = firstOrderDeformImage(base, px, py)
 	(m, n, _) = target.shape
 	# initializing coefficient matrices & vectors
-	Ax = []
-	Ay = []
-	Iz = []
+	Ax = np.array([])
+	Ay = np.array([])
+	Iz = np.array([])
 	b = []
 	Dx = []
 	Dy = []
 	C = []
+	numFacets = []
 	kernels = getKernels((m, n), k)
 
 	for x in range(m):
 		for y in range(n):
 			# Get deformation basis function values
-			c = gaussianD((x,y), kernels, sigma)
-			# Calculate deformation at x, y
-			dx = int(round(np.dot(c, px)))
-			dy = int(round(np.dot(c, py)))
-
-			# Check if within base image range:
-			if ((x + dx)*(y + dy) > 0) and (dx + x < m) and (dy + y< n):
-
-				# Contructs Error Surface
-				errorSurface = []
-
-				for i in range(-window, window):
-					for j in range(-window, window):
-
-						try:
-							error = np.linalg.norm(target[x,y] - base[x + dx + i, y + dy + j], 3)
-							errorSurface.append([x + dx + i, y + dy + j, error])
-						except: IndexError
-
-						
-
-				if len(errorSurface) > 4: # Check we have enough points
-					errorSurface = np.array(errorSurface)
-
-					hull = ConvexHull(points = errorSurface, qhull_options='QJ')
-
-					Ax1 = []
-					Ay1 = []
-					Iz1 = []
-					# Get lower planar facet coefficients
-					for i in range(len(hull.simplices)):
-
-						if hull.equations[i][2] < 0:
-							ax = hull.equations[i][0]
-							ay = hull.equations[i][1]
-							az = hull.equations[i][2]
-							dist = hull.equations[i][3]
-							
-							Ax1.append(ax)
-							Ay1.append(ay)
-							Iz1.append(1)
-							b.append(dist)
-
-					Ax.append(Ax1)
-					Ay.append(Ay1)
-					Iz.append(Iz1)
-					Dx.append(dx)
-					Dy.append(dy)
-					C.append(c)
-
-				else: 
-					Ax.append([0])
-					Ay.append([0])
-					Iz.append([1])
-					Dx.append([0])
-					Dy.append([0])
-					C.append(c)
-					b.append(1) # How to fix this issue?
-
-			else:
-				Ax.append([0])
-				Ay.append([0])
-				Iz.append([1])
-				Dx.append([0])
-				Dy.append([0])
-				C.append(c)
-				b.append(1)
-
-	Ax = coeffMatFormat(Ax)
-	Ay = coeffMatFormat(Ay)
-	Iz = coeffMatFormat(Iz)
-	b = np.array(b)
-	Dx = np.array(Dx)
-	Dy = np.array(Dy)
-	C = np.array(C)
-
-	return (Ax, Ay, Iz, b, Dx, Dy, C)
-
-def getConstraintCoeffs2(target, base, window, k, sigma, px, py):
-	# Currently Structured for a Gaussian Deformation Model
-
-	(m, n, _) = target.shape
-	# initializing coefficient matrices & vectors
-	Ax = []
-	Ay = []
-	Iz = []
-	b = []
-	Dx = []
-	Dy = []
-	C = []
-	kernels = getKernels((m, n), k)
-
-	for x in range(m):
-		for y in range(n):
-			# Get deformation basis function values
-			c = gaussianD((x,y), kernels, sigma)
+			# c = gaussianD((x,y), kernels, sigma)
+			c = firstOrderD((x,y))
 			# Calculate deformation at x, y
 			dx = int(round(np.dot(c, px)))
 			dy = int(round(np.dot(c, py)))
@@ -156,56 +65,77 @@ def getConstraintCoeffs2(target, base, window, k, sigma, px, py):
 			# Contructs Error Surface
 			errorSurface = []
 
+			""" for some predefined window, construct lower convex hull
+			of error function between target[x,y] and deformedIm[x,y]
+			"""
 			for i in range(-window, window):
 				for j in range(-window, window):
 
-					error = np.linalg.norm(target[x,y], 3) # Default to distance from black?
-					try:
-						error = np.linalg.norm(target[x,y] - base[x + dx + i, y + dy + j], 3)
-					except: IndexError
+					if ((x + i) < m and (x + i) >= 0 and (y+j) < n and (y+j) >=0):
+						error = np.linalg.norm(target[x,y] - deformedIm[x + i, y + j], 3)
+					else: 
+						error = np.linalg.norm(target[x,y], 3)
+
+					# except: IndexError
+
+					errorSurface.append([x + i, y + j, error])
+
+
+			hull = ConvexHull(points = errorSurface, qhull_options='QJ')
+			# hull = ConvexHull(points = errorSurface)
+			Ax1 = []
+			Ay1 = []
+			Iz1 = []
+			# Get lower planar facet coefficients
+			for i in range(len(hull.simplices)):
+
+				if hull.equations[i][2] < 0:
+					ax = hull.equations[i][0]
+					ay = hull.equations[i][1]
+					az = hull.equations[i][2]
+					dist = hull.equations[i][3]
 					
-					errorSurface.append([x + dx + i, y + dy + j, error])
+					Ax1.append(ax)
+					Ay1.append(ay)
+					Iz1.append(1)
+					b.append(dist)
 
+			numFacets.append(len(Ax1))
 
-				hull = ConvexHull(points = errorSurface, qhull_options='QJ')
+			# Ax.append(Ax1)
+			# Ay.append(Ay1)
+			# Iz.append(Iz1)
+			Ax = np.append(Ax, Ax1)
+			Ay = np.append(Ay, Ay1)
+			Iz = np.append(Iz, Iz1)
+			# Ax = np.concatenate((Ax, Ax1), axis = 0)
+			# Ay = np.concatenate((Ay, Ay1), axis = 0)
+			# Iz = np.concatenate((Iz, Iz1), axis = 0)
+			Dx.append(dx)
+			Dy.append(dy)
+			C.append(c)
 
-				Ax1 = []
-				Ay1 = []
-				Iz1 = []
-				# Get lower planar facet coefficients
-				for i in range(len(hull.simplices)):
+	print("Done. Time elapsed:", time.time() - start, " \n\n")
 
-					if hull.equations[i][2] < 0:
-						ax = hull.equations[i][0]
-						ay = hull.equations[i][1]
-						az = hull.equations[i][2]
-						dist = hull.equations[i][3]
-						
-						Ax1.append(ax)
-						Ay1.append(ay)
-						Iz1.append(1)
-						b.append(dist)
-
-				Ax.append(Ax1)
-				Ay.append(Ay1)
-				Iz.append(Iz1)
-				Dx.append(dx)
-				Dy.append(dy)
-				C.append(c)
-
-	Ax = coeffMatFormat(Ax)
-	Ay = coeffMatFormat(Ay)
-	Iz = coeffMatFormat(Iz)
+	formatT = time.time()
+	print("Formatting Matrices...")
+	
+	Ax = coeffMatFormat(Ax, numFacets)
+	Ay = coeffMatFormat(Ay, numFacets)
+	Iz = coeffMatFormat(Iz, numFacets)
 	b = np.array(b)
 	Dx = np.array(Dx)
 	Dy = np.array(Dy)
 	C = np.array(C)
 
-	return (Ax, Ay, Iz, b, Dx, Dy, C)
+	print("Done. Total Time Elapsed: ", time.time() - start, "\n\n")
+
+	return (deformedIm, Ax, Ay, Iz, b, Dx, Dy, C)
 
 
-def coeffMatFormat(mat):
-	"""Converts coefficients to form in paper"""
+def coeffMatFormatOLD(mat):
+	"""Converts coefficients to form in paper
+	Update: THIS IS SO SLOW"""
 	M = len(mat)
 	S = 0
 	for a in mat:
@@ -222,10 +152,20 @@ def coeffMatFormat(mat):
 
 	return sparse.csc_matrix(np.array(A))
 
+def coeffMatFormat(A, numFacets):
+    """Converts coefficients to form in paper
+    Much faster :) """
+    col = np.array([])
+    for i in range(len(numFacets)):
+        col = np.concatenate((col, [i]*numFacets[i]), axis = 0)
+        
+    row = np.array([i for i in range(len(A))])
+    
+    return sparse.csc_matrix((A, (row, col)), shape = (len(A), len(numFacets)))
+
 
 def getHessians(Ax, Ay, Iz, C, d):
 
-	# Work in progress... 4 more D_i's to go!
 	
 	D1 = Ax.T @ d @ Ax
 	D2 = Ay.T @ d @ Ax
@@ -235,19 +175,18 @@ def getHessians(Ax, Ay, Iz, C, d):
 	D6 = Iz.T @ d @ Iz
 
 	# Constructs Hp
-	Hpx = C.T@D1@C
+	Hpx   = C.T @ D1 @ C
 	Hpxpy = C.T @ D2 @ C
-	Hpy = C.T@D3@C
+	Hpy   = C.T @ D3 @ C
 
 	Hp1 = np.concatenate((Hpx, Hpxpy), axis = 1)
 	Hp2 = np.concatenate((Hpxpy, Hpy), axis = 1)
-	Hp = np.concatenate((Hp1, Hp2), axis = 0)
+	Hp  = np.concatenate((Hp1, Hp2),   axis = 0)
 
 	# Constructs Hz
 	Hz1 = D4 @ C
 	Hz2 = D5 @ C
-
-	Hz = np.concatenate((Hz1, Hz2), axis = 1)
+	Hz  = np.concatenate((Hz1, Hz2), axis = 1)
 
 	return (Hp, Hz, D6)
 
