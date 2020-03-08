@@ -7,35 +7,193 @@ import cvxpy as cvx
 import time
 
 
-def Taylor08(target, base, window, px, py):
-	"""Inputs: 
-				TARGET, BASE: m x n x 3 RGB images
-				WINDOW: integer defining the size 
-				of the window for convex approximation
-				PX, PY: vectors of length 3 + # of kernels
-				Z: auxilary variable to be minimized
 
-	"""
-	(m,n, _ ) = target.shape
+def Taylor08(target, base):
 
-	k = 4 # 16 kernels
-	sigma = 10
+	# Given feasible starring point z for p = zeros
 
-	(deformedIm, Ax, Ay, Iz, b, Dx, Dy, C) = getConstraintCoeffs(target, base, window, k, sigma, px, py)
+	(Ax, Ay, Iz, b, C) = getConstraintCoeffs(target, base, 15, 4 ,10)
 
-	# A = (Ax @ C @ px) + (Ay @ C @ py) - z
+	z = np.ones(Iz.shape[1])*180
+	t = 1
+	mu = 20
+	eps = 1/10
 
-	# s = b - A
-	# d = sparse.diags(s**(-1))
-	# d2 = d**2
+	M = len(b)
+	p = np.zeros(38)
 
-	# (Hp, Hz, D6) = getHessians(Ax, Ay, Iz, C, d2)
+	while True:
+		(pStar, zStar) = TaylorNewtonStep((Ax, Ay, Iz, b, C), p, z, t)
+		p = pStar
+		z = zStar
+		gap = M/t
+		print('Current gap:', gap, '\n\n')
+		if gap <= eps:
+			break
+		t = mu*t
 
-	return (deformedIm, Ax, Ay, Iz, b, Dx, Dy, C)
+	return p
+
+
+def TaylorNewtonStep(facetCoeffs, p, z, t):
+    # minimizes t*z - sum(log(ax_i ci.T px + ay_i ci.T py - Izi.T z - bi)) wrt z, px, py
+    (Ax, Ay, Iz, b, C) = facetCoeffs
+
+    c = t*np.ones(Iz.shape[1])
+    
+    L = int(len(p) / 2)
+    
+    # line search params:
+    alpha = 0.3
+    beta = 0.8
+    eps =  1/10**6 # Not sure what to make this
+    maxiters = 100
+    count = 0
+    
+    # Perform Line Search:
+    for iter in range(maxiters):
+        
+        count += 1
+        A = (Ax @ C @ p[:L]) + (Ay @ C @ p[L:]) - Iz @ z
+        s = b - A
+        d = sparse.diags(s**(-1))
+        d2 = d**2
+
+        (Hp, Hz, D6) = getHessians(Ax, Ay, Iz, C, d2)
+        (gp, gz) = getGradients(Ax, Ay, Iz, C, s, t)
+        
+        # Solve for Newton Step:
+        g = np.concatenate((gp,gz), axis = 0)
+        
+        Dinv = sparse.linalg.inv(D6)
+        Hprime = Hp - Hz.T @ Dinv @ Hz
+        gpprime = (-1 * gp) - Hz.T @ Dinv @ (-1 * gz)
+        
+        # Use Block Diagonals and Schur Complement to solve the system:
+        # dp = np.linalg.solve(Hp - Hz.T @ Dinv @ Hz, (-1*gp) - Hz.T @ Dinv @ (-1*gz)) 
+        dp = np.linalg.solve(Hprime, gpprime)
+        dz = sparse.linalg.inv(D6)@((-1*gz) - Hz @ dp)
+        delta = np.concatenate((dp, dz), axis = 0)
+#         gprime = gp - Hz.T @ Dinv @ gz
+        
+        g2 = np.concatenate((gpprime, gz), axis = 0)
+                
+        # Check Optimality Gap:
+#         lambdasqr = -1 * dp.T @ Hprime @ dp
+        lambdasqr = -1 * g.T @ delta
+        # print('lambdasqr/2 = ', lambdasqr/2, '\n\n')
+        if lambdasqr / 2 < eps:
+            break # if already eps-suboptimal
+       
+        # else: 
+        tau = 1        
+        
+        # Check if z + tau * dz is feasible
+        while max(Ax @ C @ (p + tau * dp)[:L] + \
+                  Ay @ C @ (p + tau * dp)[L:] - \
+                  Iz @ (z + tau * dz) - b) >= 0.0:
+
+            # Update tau
+            tau = beta * tau
+
+        # Want f(x + t*x_nt) < f(x) + t*alpha*g.T @ x_nt 
+        while c.T @ (tau * dz) - sum(np.log(-1 * (Ax @ C @ (p + tau * dp)[:L] + \
+                Ay @ C @ (p + tau * dp)[L:] - Iz @ (z + tau * dz) - b))) \
+                + sum(np.log(-1 * (Ax @ C @ p[:L] + Ay @ C @ p[L:] - Iz @ z - b))) - \
+                alpha * tau * g.T @ delta > 0:
+            # Update tau
+            tau = beta * tau
+                    
+        p += tau * dp
+        z += tau * dz
+        
+
+    if count == maxiters:
+        print('ERROR: MAXITERS reached.\n')
+        p = 0
+        z = 0
+    
+    return (p, z)
+
+
+def getConstraintCoeffs(target, base, window, k, sigma):
+	# Currently Structured for a Gaussian Deformation Model
+	start = time.time()
+	print("Getting Coefficients...")
+
+	(m, n, _) = target.shape
+	# initializing coefficient matrices & vectors
+	Ax = np.array([])
+	Ay = np.array([])
+	Iz = np.array([])
+	b = []
+	C = []
+	numFacets = []
+	kernels = getKernels((m, n), k)
+
+	for x in range(n):
+		for y in range(m):
+
+			# Contructs Error Surface
+			errorSurface = []
+
+			""" for some predefined window, construct lower convex hull
+			of error function between target[x,y] and deformedIm[x,y]
+			"""
+			for i in range(-window, window):
+				for j in range(-window, window):
+
+					if ((x + i) < n and (x + i) >= 0 and (y+j) < m and (y+j) >=0):
+						error = np.linalg.norm(target[x,y] - base[x + i, y + j], 3) ** 2
+
+						# errorSurface.append([x + i, y + j, error])
+						errorSurface.append([i, j, error])
+
+			hull = ConvexHull(points = errorSurface)
+
+			Ax1 = []
+			Ay1 = []
+			Iz1 = []
+			# Get lower planar facet coefficients
+			for i in range(len(hull.simplices)):
+
+				if hull.equations[i][2] < 0:
+					ax = hull.equations[i][0]
+					ay = hull.equations[i][1]
+					az = hull.equations[i][2]
+					dist = hull.equations[i][3]
+					
+					Ax1.append(ax)
+					Ay1.append(ay)
+					Iz1.append(1)
+					b.append(dist)
+
+			numFacets.append(len(Ax1))
+
+			Ax = np.append(Ax, Ax1)
+			Ay = np.append(Ay, Ay1)
+			Iz = np.append(Iz, Iz1)
+			C.append(gaussianD((x,y), kernels, sigma))
+
+	print("Done. Time elapsed:", time.time() - start, " \n\n")
+
+	formatT = time.time()
+	print("Formatting Matrices...")
+	
+	Ax = coeffMatFormat(Ax, numFacets)
+	Ay = coeffMatFormat(Ay, numFacets)
+	Iz = coeffMatFormat(Iz, numFacets)
+	b = np.array(b)
+
+	C = np.array(C)
+
+	print("Done. Total Time Elapsed: ", time.time() - start, "\n\n")
+
+	return (Ax, Ay, Iz, b, C)
 
 
 # Marginally improved.
-def getConstraintCoeffs(target, base, window, k, sigma, px, py):
+def getConstraintCoeffs2(target, base, window, k, sigma, px, py):
 	# Currently Structured for a Gaussian Deformation Model
 	start = time.time()
 	print("Getting Coefficients...")
@@ -53,8 +211,8 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 	numFacets = []
 	kernels = getKernels((m, n), k)
 
-	for x in range(m):
-		for y in range(n):
+	for x in range(n):
+		for y in range(m):
 			# Get deformation basis function values
 			# c = gaussianD((x,y), kernels, sigma)
 			c = firstOrderD((x,y))
@@ -71,14 +229,12 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 			for i in range(-window, window):
 				for j in range(-window, window):
 
-					if ((x + i) < m and (x + i) >= 0 and (y+j) < n and (y+j) >=0):
-						error = np.linalg.norm(target[x,y] - deformedIm[x + i, y + j], 3)
-					else: 
-						error = np.linalg.norm(target[x,y], 3)
+					if ((x + i) < n and (x + i) >= 0 and (y+j) < m and (y+j) >=0):
+						error = np.linalg.norm(target[x,y] - deformedIm[x + i, y + j], 3) ** 2
 
-					# except: IndexError
+						# errorSurface.append([x + i, y + j, error])
+						errorSurface.append([i, j, error])
 
-					errorSurface.append([x + i, y + j, error])
 
 
 			hull = ConvexHull(points = errorSurface, qhull_options='QJ')
@@ -102,15 +258,9 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 
 			numFacets.append(len(Ax1))
 
-			# Ax.append(Ax1)
-			# Ay.append(Ay1)
-			# Iz.append(Iz1)
 			Ax = np.append(Ax, Ax1)
 			Ay = np.append(Ay, Ay1)
 			Iz = np.append(Iz, Iz1)
-			# Ax = np.concatenate((Ax, Ax1), axis = 0)
-			# Ay = np.concatenate((Ay, Ay1), axis = 0)
-			# Iz = np.concatenate((Iz, Iz1), axis = 0)
 			Dx.append(dx)
 			Dy.append(dy)
 			C.append(c)
@@ -133,25 +283,6 @@ def getConstraintCoeffs(target, base, window, k, sigma, px, py):
 	return (deformedIm, Ax, Ay, Iz, b, Dx, Dy, C)
 
 
-def coeffMatFormatOLD(mat):
-	"""Converts coefficients to form in paper
-	Update: THIS IS SO SLOW"""
-	M = len(mat)
-	S = 0
-	for a in mat:
-		S+=len(a)
-	
-	A = np.zeros([S, M])
-
-	j = 0
-	for i in range(len(mat)):
-	    a = mat[i]
-	    l = len(a)
-	    A[j:j+l, i] = a
-	    j+=l
-
-	return sparse.csc_matrix(np.array(A))
-
 def coeffMatFormat(A, numFacets):
     """Converts coefficients to form in paper
     Much faster :) """
@@ -166,12 +297,12 @@ def coeffMatFormat(A, numFacets):
 
 def getHessians(Ax, Ay, Iz, C, d):
 
-	
+	# Pls review Multivariate Calculus
 	D1 = Ax.T @ d @ Ax
-	D2 = Ay.T @ d @ Ax
+	D2 = Ax.T @ d @ Ay
 	D3 = Ay.T @ d @ Ay
-	D4 = Iz.T @ d @ Ax
-	D5 = Iz.T @ d @ Ay
+	D4 = -1 * Ax.T @ d @ Iz
+	D5 = -1 * Ay.T @ d @ Iz
 	D6 = Iz.T @ d @ Iz
 
 	# Constructs Hp
@@ -190,71 +321,29 @@ def getHessians(Ax, Ay, Iz, C, d):
 
 	return (Hp, Hz, D6)
 
+def getGradients(Ax, Ay, Iz, C, s, t):
 
-def TaylorNewtonStep(Ax, Ay, Iz, b, s, d, d2, p, z):    
-	""" 
-	*CURRENTLY BROKEN**
+    gz =  t - (Iz.T @ s**(-1))
+    gpx =  C.T @ Ax.T @ s**(-1)
+    gpy =  C.T @ Ay.T @ s**(-1)
+    gp = np.concatenate((gpx, gpy), axis = 0)
+    
+    return (gp, gz)
 
-	With each iteration we are seeking to minimize 
-	t 1.T@z - sum[ log(b - AxCpx - (Ay @ C @ py)  + (Iz @ z)) ]
-
-	"""
-	# parameters for line search:
-	alpha = 0.01
-	beta = 0.8
-	eps = 1/(10**6)
-	maxiters = 100
-	count = 0
-	L = Ax.shape[1]
-
-	#     gpx = -1 * C.T@Ax.T@s**(-1)
-	#     gpy = -1 * C.T@Ay.T@s**(-1)
-	#     gp = np.concatenate((gpx, gpy), axis = 0)
-	for iter in range(maxiters):
-		count += 1
-		#(Hp, Hz) = getHessians(Ax, Ay, Iz, C, np.diag(1/s**(2)))
-		(Hp, Hz, D6) = getHessians(Ax, Ay, Iz, C, d2)
-
-		gpx = -1 * C.T@Ax.T@s**(-1)
-		gpy = -1 * C.T@Ay.T@s**(-1)
-		gp = np.concatenate((gpx, gpy), axis = 0)
-		gz = -1 * Iz.T@s**(-1)
-		g = np.concatenate((gp, gz), axis = 0)
-		Dinv = sparse.linalg.inv(D6)
-
-		dp = np.linalg.solve(Hp - Hz.T @ Dinv @ Hz, gp - Hz.T @ Dinv @ gz)
-		dz = sparse.linalg.inv(D6)@(gz - Hz @ dp)
-		delta = np.concatenate((dp, dz), axis = 0)
-
-		lambdasquared = -1*g.T @ delta
-
-		# otherwise perform line search:
-		t = 1
-
-		while  (t * np.ones(len(dz)).T @ dz - np.sum( np.log( b - (Ax@C@(p + t * dp)[:19]) - (Ay @ C @ (p + t * dp)[19:])) + Iz@(z + dz)) - alpha * t * (gz.T @ deltaZ) > 0):
-			t = beta * t
-	    
-		p = p + t * dp
-
-		if count == maxiters:
-			print('ERROR: MAXITERS reached.\n')
-			p = 0
-
-	return p
 
 def main():
 
-	target = readImage('images/BrainProtonDensitySliceShifted13x17y.png', (100,100))
-	base = readImage('images/BrainT1Slice.png', (100,100))
+	target = readImage('images/BrainT1SliceR10X13Y17.png', (50,50))
+	base = readImage('images/BrainT1Slice.png', (50,50))
 	(m, n, _) = base.shape
 
-	px = np.random.random(19)
-	py = np.random.random(19)
+	p = Taylor08(base, target)
 
-	plt.imshow(gaussianDeformImage(base, target, px, py))
+	im = gaussianDeformImage(base, 10, 4, p[:19], p[19:])
+
+	plt.imshow(im)
 	plt.show()
 
-	Taylor08(target, base, 10, px, py)
 
 if __name__ == '__main__':
 	main()

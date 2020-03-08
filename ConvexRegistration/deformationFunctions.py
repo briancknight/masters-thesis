@@ -38,9 +38,12 @@ def secondOrderDeformImage(im, px, py):
 			Dx = int(round(np.dot(c, px)))
 			Dy = int(round(np.dot(c, py)))
 
-			try:
-				deformedIm[i + Dx, j + Dy] = im[i,j]
-			except: IndexError
+
+			if (i + Dx < m) and (j + Dy) < n: 
+				if (i + Dx >= 0) and (j + Dy >= 0):
+
+					deformedIm[i + Dx, j + Dy] = im[i,j]
+
 
 	return deformedIm.astype(int)
 
@@ -56,11 +59,24 @@ def firstOrderDeformImage(im, px, py):
 			Dx = int(round(np.dot(c, px)))
 			Dy = int(round(np.dot(c, py)))
 
-			try:
-				deformedIm[i + Dx, j + Dy] = im[i,j]
-			except: IndexError
+			if (i + Dx < m) and (j + Dy) < n: 
+				if (i + Dx >= 0) and (j + Dy >= 0):
+					
+					deformedIm[i + Dx, j + Dy] = im[i,j]
 
 	return deformedIm.astype(int)
+
+def xyShift(im, dx, dy):
+
+	(m, n, _) = im.shape
+
+	deformedIm = np.zeros([m, n, 3])
+
+	for i in range(m):
+		for j in range(n):
+			if (i + Dx < m) and (j + Dy) < n and (i + Dx >= 0) and (j + Dy >= 0): 
+						
+				deformedIm[i + Dx, j + Dy] = im[i,j]
 
 def gaussianDeformImage(im, sigma, k, px, py):
 
@@ -77,10 +93,11 @@ def gaussianDeformImage(im, sigma, k, px, py):
 			Dx = int(round(np.dot(c, px)))
 			Dy = int(round(np.dot(c, py)))
 
-			try:
-				deformedIm[i + Dx, j + Dy] = im[i,j]
 
-			except: IndexError
+			if (i + Dx < m) and (j + Dy) < n: 
+				if (i + Dx >= 0) and (j + Dy >= 0):
+					
+					deformedIm[i + Dx, j + Dy] = im[i,j]
 
 	return deformedIm.astype(int)
 	
@@ -90,9 +107,9 @@ def getKernels(dims, k):
 	im should be a numpy array, this returns evenly
 	distributed seed points for segmentation algorithms
 
-	returns n^2 seeds, evently distributed in im
+	returns k^2 seeds, evently distributed in im
 	"""
-	(m, n) = dims
+	(n, m) = dims
 
 	if k**2 > max(m, n):
 		raise Exception('Image too small for this many kernels')

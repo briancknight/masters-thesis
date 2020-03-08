@@ -1,7 +1,8 @@
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
-from scipy.spatial import ConvexHull  
+from scipy.spatial import ConvexHull 
+from imTools import *
 
 
 def plotHull(pts):
@@ -37,12 +38,16 @@ def plotHull(pts):
 
 	plt.show()
 
-def plotLowerHull(pts):
+def plotLowerHull(pts, scatterFlag):
 
 	hull = ConvexHull(points=pts)
+	# hull = ConvexHull(points = errorSurface, qhull_options='QJ')
 
-	fig = plt.figure()
+	fig = plt.figure(figsize=(8.5,8.5))
 	ax = fig.add_subplot(111, projection="3d")
+
+	if scatterFlag == 1:
+		ax.scatter(pts.T[0], pts.T[1], pts.T[2], '.')
 	# Plot defining corner points
 	# ax.plot(hull.points.T[0], hull.points.T[1], hull.points.T[2], "ko")	
 
@@ -72,9 +77,49 @@ def plotLowerHull(pts):
 
 	plt.show()
 
+def plotl2Scatter(pts, pix):
+
+	(x, y) = pix
+
+	pts = []
+	for i in range(-10, 10):
+		for j in range(-10, 10):
+
+			pts.append([x+i, y+j, np.linalg.norm(target[x,y] - base[x+i,y+j], 3)**2])
+
+	fig = plt.figure(figsize=(8.5,8.5))
+	ax = fig.add_subplot(111, projection="3d")
+	pts = np.array(pts)
+	ax.scatter(pts.T[0], pts.T[1], pts.T[2], '.r-')
+
+	# Make axis label
+	for i in ["x", "y", "z"]:
+	    eval("ax.set_{:s}label('{:s}')".format(i, i))
+
+	plt.show()
+
 
 def main():
-	pass
+	
+	base = readImage('images/BrainT1Slice.png')
+	target = readImage('images/BrainT1SliceR10X13Y17.png')
+
+	# (x, y) = (100, 150)
+	(x, y) = (75, 150)
+
+	pts = []
+	for i in range(-10, 10):
+		for j in range(-10, 10):
+
+			pts.append([x+i, y+j, np.linalg.norm(target[x,y] - base[x+i,y+j], 3)**2])
+
+	pts = np.array(pts)
+
+
+	plotLowerHull(pts, 1)
+
+	# plt.imshow(base)
+	plt.show()
 
 
 if __name__ == '__main__':

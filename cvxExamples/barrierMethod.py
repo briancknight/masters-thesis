@@ -5,7 +5,7 @@ from leastsquares import leastsquares
 from matplotlib import pyplot as plt
 from lp_solver import LPSolver
 import cvxpy as cvx
-"""This will e a simple implementation of the barrier method for a general LP"""
+"""This will be a simple implementation of the barrier method for some common LPs"""
 
 def eqNewtonStep(A, b, c, x):
 
@@ -87,7 +87,7 @@ def ineqNewtonStep(A, b, c, x):
 	    dx = -1 * np.linalg.inv(H) @ g 
 	    # print(dx)
 
-	    lambdasqr = -1*g.T @ dx
+	    lambdasqr = -1 * g.T @ dx
 	    lambda_hist.append(lambdasqr/2)
 
 	    if lambdasqr/2 <= eps:
@@ -95,14 +95,20 @@ def ineqNewtonStep(A, b, c, x):
 
 	    # otherwise perform line search:
 	    t = 1
+
+	    # Make sure x + dx feasible, i.e. satisfies A(x + dx) < b
 	    while min(b - A @ (x + t*dx)) <= 0:
 	        t = beta * t
 	    
-	    while ( c.T * t @ dx ) - ( A.T @ np.sum(np.log(b - A @ (x + t * dx))) ) +\
-	    ( A.T @ np.sum(np.log(b - A @ (x + t * dx))) @ A ) -\
-	    ( alpha * t * (g.T @ dx) ) > 0:
+	    # Ensure decrease in lambdasqr/2 by alpha percent, g @ dx - f(x  + dx) + 
+	    # while ( c.T * t @ dx ) - ( A.T @ np.sum(np.log(b - A @ (x + t * dx))) ) +\
+	    # ( A.T @ np.sum(np.log(b - A @ (x + t * dx))) @ A ) -\
+	    # ( alpha * t * (g.T @ dx) ) > 0:
 
-	        t = beta * t
+	    #     t = beta * t
+
+	    while (t * c.T @ dx - np.sum(np.log(b - A @ (x + t * dx))) + np.sum(np.log(b - A @ x)) - alpha * t * (g.T @ dx) ) > 0:
+	    	t = beta * t
 
 	    x = x + t * dx
 
@@ -115,10 +121,10 @@ def ineqNewtonStep(A, b, c, x):
 
 def lpEqBarrier(A, b, c, x):
 	"""
-	Solves the equality constrained minimization problem
+	Solves the inequality constrained minimization problem
 	minimize c^Tx
 	subject to Ax = b
-
+				x >= 0
 	Given a strictly feasible starting point x"""
 
 	(m, n) = A.shape
@@ -150,7 +156,6 @@ def lpIneqBarrier(A, b, c, x):
 
 	Given a strictly feasible starting point x
 
-	Does not currently work :(
 	"""
 
 	(m, n) = A.shape
@@ -207,17 +212,17 @@ def main():
 	c = np.random.randn(n)
 
 	# get feasible x:
-	# x0, p = leastsquares(A, b, [np.zeros(len(c))])
+	x0, p = leastsquares(A, b, [np.zeros(len(c))])
 
-	# (xopt, v, lambda_hist) = NewtonStep(A, b, c, x0)
 
-	# (xStar, history, gap) = lpEqBarrier(A, b, c, x0)
-	(xStar, history, gap) = lpIneqBarrier(A, b, c, p)
+
+	(xStar, history, gap) = lpEqBarrier(A, b, c, x0)
+	# (xStar, history, gap) = lpIneqBarrier(A, b, c, p)
 	print(c.T @ xStar)
 
 	y = cvx.Variable(n)
 	objective = cvx.Minimize(c.T @ y)
-	constraints = [A @ y <= b]
+	constraints = [A @ y == b, y >=0]
 	problem = cvx.Problem(objective, constraints)
 	result = problem.solve()
 
