@@ -36,6 +36,31 @@ def affineTransform(im, xShift, yShift, theta, xScale, yScale, shearX, shearY):
 
 	return outimg
 
+def displacementTransform(im, D):
+
+	sitkIm = sitk.GetImageFromArray(im, sitk.sitkVectorFloat32)
+
+	sitkDisplacement = sitk.GetImageFromArray(D, sitk.sitkVectorFloat32)
+	displacement = sitk.DisplacementFieldTransform(sitkDisplacement)
+
+	# Defaults to Linear
+
+	# displacement.SetInterpolator(sitk.sitkNearestNeighbor)
+	# displacement.SetParameters(D)
+
+	resampler = sitk.ResampleImageFilter()
+	resampler.SetReferenceImage(sitkIm)
+	resampler.SetInterpolator(sitk.sitkLinear)
+	resampler.SetDefaultPixelValue(0)
+	resampler.SetTransform(displacement)
+
+	outimgsitk = resampler.Execute(sitkIm)
+
+	outimg = sitk.GetArrayFromImage(outimgsitk)
+	outimg = outimg.astype(int)
+
+	return outimg
+	
 
 def transformImage(im, transform, *args):
 

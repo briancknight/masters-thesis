@@ -1,4 +1,5 @@
 import numpy as np
+from Transforms import displacementTransform
 
 def secondOrderD(pix):
 
@@ -14,7 +15,7 @@ def firstOrderD(pix):
 
 def gaussianD(pix, kernels, sigma):
 
-	(x, y) = pix
+	(x,y) = pix
 
 	C = [1, x, y]
 
@@ -26,80 +27,78 @@ def gaussianD(pix, kernels, sigma):
 	return C
 
 
-def secondOrderDeformImage(im, px, py):
+def secondOrderDeformImage(im, p):
 
-	(m,n, _) = im.shape
+    if len(p) != 12:
+        raise Exception('Incorrect number of deformation parameters for Second Order Deformation')
 
-	deformedIm = np.zeros([m, n, 3])
+    px = p[:6]
+    py = p[6:]
 
-	for i in range(m):
-		for j in range(n):
-			c = secondOrderD((i,j))
-			Dx = int(round(np.dot(c, px)))
-			Dy = int(round(np.dot(c, py)))
+    (rows, cols, _) = im.shape
 
+    displacements = np.zeros([rows, cols, 2])
 
-			if (i + Dx < m) and (j + Dy) < n: 
-				if (i + Dx >= 0) and (j + Dy >= 0):
+    for y in range(rows):
+        for x in range(cols):
 
-					deformedIm[i + Dx, j + Dy] = im[i,j]
+            c = secondOrderD((x, y))
+            Dx = np.dot(c, px)
+            Dy = np.dot(c, py)
+            # The minuse defines our orientation (down and right is  ++)
+            displacements[y, x] = [-Dx, -Dy]
 
-
-	return deformedIm.astype(int)
-
-def firstOrderDeformImage(im, px, py):
-
-	(m, n, _) = im.shape
-
-	deformedIm = np.zeros([m, n, 3])
-
-	for i in range(m):
-		for j in range(n):
-			c = firstOrderD((i,j))
-			Dx = int(round(np.dot(c, px)))
-			Dy = int(round(np.dot(c, py)))
-
-			if (i + Dx < m) and (j + Dy) < n: 
-				if (i + Dx >= 0) and (j + Dy >= 0):
-					
-					deformedIm[i + Dx, j + Dy] = im[i,j]
-
-	return deformedIm.astype(int)
-
-def xyShift(im, dx, dy):
-
-	(m, n, _) = im.shape
-
-	deformedIm = np.zeros([m, n, 3])
-
-	for i in range(m):
-		for j in range(n):
-			if (i + Dx < m) and (j + Dy) < n and (i + Dx >= 0) and (j + Dy >= 0): 
-						
-				deformedIm[i + Dx, j + Dy] = im[i,j]
-
-def gaussianDeformImage(im, sigma, k, px, py):
-
-	(m,n, _) = im.shape
-
-	kernels = getKernels((m,n), k)
-
-	deformedIm = np.zeros([m, n, 3])
-
-	for i in range(m):
-		for j in range(n):
-
-			c = gaussianD((i, j), kernels, sigma)
-			Dx = int(round(np.dot(c, px)))
-			Dy = int(round(np.dot(c, py)))
+    return displacementTransform(im, displacements)
 
 
-			if (i + Dx < m) and (j + Dy) < n: 
-				if (i + Dx >= 0) and (j + Dy >= 0):
-					
-					deformedIm[i + Dx, j + Dy] = im[i,j]
+def firstOrderDeformImage(im, p):
 
-	return deformedIm.astype(int)
+	# Models and affine transformation
+
+	if len(p) != 6:
+	    raise Exception('Incorrect number of deformation parameters for Second Order Deformation')
+
+	px = p[:3]
+	py = p[3:]
+
+	(rows, cols, _) = im.shape
+
+	displacements = np.zeros([rows, cols, 2])
+
+	for y in range(rows):
+		for x in range(cols):
+
+			c = firstOrderD((x,y))
+			Dx = np.dot(c, px)
+			Dy = np.dot(c, py)
+			displacements[y, x] = [-Dx, -Dy]
+
+	return displacementTransform(im, displacements)
+
+
+def gaussianDeformImage(im, sigma, k, p):
+
+	if len(p) != 38:
+	    raise Exception('Incorrect number of deformation parameters for Second Order Deformation')
+
+	px = p[:19]
+	py = p[19:]
+
+	(rows,cols, _) = im.shape
+
+	kernels = getKernels((rows, cols), k)
+
+	displacements = np.zeros([rows, cols, 2])
+
+	for y in range(rows):
+		for x in range(cols):
+
+			c = gaussianD((x,y), kernels, sigma)
+			Dx = np.dot(c, px)
+			Dy = np.dot(c, py)
+			displacements[y, x] = [-Dx, -Dy]
+
+	return displacementTransform(im, displacements)
 	
 
 def getKernels(dims, k):
@@ -109,25 +108,25 @@ def getKernels(dims, k):
 
 	returns k^2 seeds, evently distributed in im
 	"""
-	(n, m) = dims
+	(rows, cols) = dims
 
-	if k**2 > max(m, n):
+	if k**2 > max(rows, cols):
 		raise Exception('Image too small for this many kernels')
 
 	kernels = []
 
 	if k == 1:
-		kernel = (int(np.floor(m / 2)), int(np.floor(n / 2)))
+		kernel = (int(np.floor(rows / 2)), int(np.floor(cols / 2)))
 		kernels.append(kernel)
 
 		return kernels
 
 	else:
-		xStart = np.floor(m / k)
-		xEnd = m - xStart
+		xStart = np.floor(cols / k)
+		xEnd = cols - xStart
 
-		yStart = np.floor(n / k)
-		yEnd = n - yStart
+		yStart = np.floor(rows / k)
+		yEnd = rows - yStart
 
 		x = np.linspace(xStart, xEnd, k).astype(int)
 		y = np.linspace(yStart, yEnd, k).astype(int)

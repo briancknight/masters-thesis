@@ -40,10 +40,10 @@ def plotHull(pts):
 
 def plotLowerHull(pts, scatterFlag):
 
-	hull = ConvexHull(points=pts)
-	# hull = ConvexHull(points = errorSurface, qhull_options='QJ')
+	# hull = ConvexHull(points=pts)
+	hull = ConvexHull(points = pts, qhull_options='QJ')
 
-	fig = plt.figure(figsize=(8.5,8.5))
+	fig = plt.figure(figsize=(6.5,6.5))
 	ax = fig.add_subplot(111, projection="3d")
 
 	if scatterFlag == 1:
@@ -77,17 +77,9 @@ def plotLowerHull(pts, scatterFlag):
 
 	plt.show()
 
-def plotl2Scatter(pts, pix):
+def plotl2Scatter(pts):
 
-	(x, y) = pix
-
-	pts = []
-	for i in range(-10, 10):
-		for j in range(-10, 10):
-
-			pts.append([x+i, y+j, np.linalg.norm(target[x,y] - base[x+i,y+j], 3)**2])
-
-	fig = plt.figure(figsize=(8.5,8.5))
+	fig = plt.figure(figsize=(6.5,6.5))
 	ax = fig.add_subplot(111, projection="3d")
 	pts = np.array(pts)
 	ax.scatter(pts.T[0], pts.T[1], pts.T[2], '.r-')
@@ -99,27 +91,46 @@ def plotl2Scatter(pts, pix):
 	plt.show()
 
 
-def main():
-	
+def generateExampleFigures():
+
 	base = readImage('images/BrainT1Slice.png')
 	target = readImage('images/BrainT1SliceR10X13Y17.png')
 
-	# (x, y) = (100, 150)
-	(x, y) = (75, 150)
+	# Example of feature region
+	(x, y) = (100, 130)
 
 	pts = []
-	for i in range(-10, 10):
+	for i in range(-12, 12):
 		for j in range(-10, 10):
 
-			pts.append([x+i, y+j, np.linalg.norm(target[x,y] - base[x+i,y+j], 3)**2])
+			pts.append([i, j, np.linalg.norm(target[y,x] - base[y+i,x+j], 3)**2])
 
 	pts = np.array(pts)
 
-
+	plotl2Scatter(pts)
 	plotLowerHull(pts, 1)
+	plotLowerHull(pts, 0)
 
-	# plt.imshow(base)
-	plt.show()
+
+	# Example of homogeneous region
+	(x, y) = (150, 75)
+
+	pts = []
+	for i in range(-10, 10):
+		for j in range(-12, 12):
+
+			pts.append([i, j, np.linalg.norm(target[y,x] - base[y+i,x+j], 3)**2])
+
+	pts = np.array(pts)
+
+	plotl2Scatter(pts)
+	plotLowerHull(pts, 1)
+	plotLowerHull(pts, 0)
+
+
+def main():
+	
+	generateExampleFigures()
 
 
 if __name__ == '__main__':
