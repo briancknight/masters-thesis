@@ -39,7 +39,6 @@ def affineTransform(im, xShift, yShift, theta, xScale, yScale, shearX, shearY):
 def displacementTransform(im, D):
 
 	sitkIm = sitk.GetImageFromArray(im, sitk.sitkVectorFloat32)
-
 	sitkDisplacement = sitk.GetImageFromArray(D, sitk.sitkVectorFloat32)
 	displacement = sitk.DisplacementFieldTransform(sitkDisplacement)
 

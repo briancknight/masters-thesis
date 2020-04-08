@@ -7,8 +7,173 @@ import cvxpy as cvx
 import time
 
 
+def TaylorMSConvexRegistration(target, base, deformParams, *args):
+    
+    if len(args) != 0:
+        fullScaleFlag = args[0]
+    else:
+        fullScaleFlag = 1
+        
+    (window, numScales, bounds, deformType) = deformParams
+    
+    deformType = deformType.lower()
+    bounds = np.array(bounds)
+    
+    # Set Newton Step Function:
+    if len(bounds) == 0:
+        NewtonStep = TaylorNSUnconstrained
+    else:
+        NewtonStep = TaylorNSConstrained
+        
+    
+    P = []
+    for i in range(numScales):
+        
+        scale = 2**((numScales - 1) - i)
+        
+        if fullScaleFlag == 0:
+            if scale == 1:
+                break
+            
+        dsBase = downSample(base, scale)
+        dsTarget = downSample(target, scale)
+        
+        dsWindow = int(np.floor( window / scale ))
+        
+        if i == 0:
+            currentBase = dsBase
+        else:
+            currentBase = newBase
+            
+        (pi, zi) = Taylor08(dsTarget, currentBase, deformType, dsWindow, scale, bounds / scale)
+        
+        
+        P.append(-1*pi*scale)
+        
+        dParams = [sum(P)]
 
-def Taylor08(target, base, deformType, window, dConstraints):
+        if deformType == 'gaussian':
+            sigma = 10
+            dParams.append(sigma)
+        if (deformType == 'gaussian') or (deformType == 'thinplate'):
+            k = 4
+            dParams.append(k)
+        
+        currentRegistration = deformImage(base, deformType, dParams)
+        
+        if scale != 1:
+            newBase = downSample(currentRegistration, scale/2)
+            
+        window = int(np.floor(window*(1/2.5)))
+        
+        # plt.imshow(currentRegistration)
+        # plt.show()
+        
+    p = sum(P)
+    print('Current Deformation Parameters: ', p, '\n\n')
+
+    return (p, currentRegistration)
+
+
+def cvxTaylorMSConvexRegistration(target, base, deformParams, *args):
+    
+    if len(args) != 0:
+        fullScaleFlag = args[0]
+    else:
+        fullScaleFlag = 1
+
+    (window, numScales, bounds, deformType) = deformParams
+    
+    deformType = deformType.lower()
+    bounds = np.array(bounds)
+    
+    if len(bounds) != 0:
+        (lbX, ubX, lbY, ubY) = bounds
+        
+    P = []
+    for i in range(numScales):
+        
+        scale = 2**((numScales - 1) - i)
+        # dsBase = downSample(base, scale)
+        dsTarget = downSample(target, scale)
+
+        if fullScaleFlag == 0:
+            if scale == 1:
+                break
+            
+        dsWindow = int(np.floor( window / scale ))
+        
+        if i == 0:
+            currentBase = downSample(base, scale)
+        else:
+            currentBase = newBase
+            
+        (M, N, _) = dsTarget.shape
+
+        if deformType == 'gaussian':
+            L = 19
+        elif deformType == 'firstorder':
+            L = 3
+        elif deformType == 'secondorder':
+            L = 6
+        elif deformType == 'thirdorder':
+            L = 10
+        else:# default to gaussian
+            L = 19
+            deformType = 'gaussian'
+        
+
+        (Ax, Ay, Iz, b, C) = getConstraintCoeffs(dsTarget, currentBase, dsWindow, scale, deformType)
+        z = cvx.Variable(M*N)
+        px = cvx.Variable(L)
+        py = cvx.Variable(L)
+
+        objective = cvx.Minimize(np.ones(M*N).T @ z)
+        
+        constraints = [Ax @ C @ px + Ay @ C @ py - Iz @ z - b <= 0]
+        if len(bounds) != 0:
+            constraints = [Ax @ C @ px + Ay @ C @ py - Iz @ z - b <= 0,
+                          C @ px >= lbX/scale*np.ones(M*N),
+                          C @ px <= ubX/scale*np.ones(M*N),
+                          C @ py >= lbY/scale*np.ones(M*N),
+                          C @ py <= ubY/scale*np.ones(M*N)]
+            
+        prob = cvx.Problem(objective, constraints)
+
+        result = prob.solve(solver=cvx.ECOS)
+        
+        pi = np.concatenate((px.value, py.value), axis=0)
+        
+        P.append(-1*pi*scale)
+        
+        dParams = [sum(P)]
+
+        if deformType == 'gaussian':
+            sigma = 10
+            dParams.append(sigma)
+        if (deformType == 'gaussian') or (deformType == 'thinplate'):
+            k = 4
+            dParams.append(k)
+        
+        if scale == 1:
+            currentRegistration = deformImage(base, deformType, dParams)
+        else:
+            currentRegistration = deformImage(base, deformType, dParams)
+            newBase = downSample(currentRegistration, scale/2)
+        
+        window = int(np.floor(window*(1/2.5)))
+        
+        # plt.imshow(currentRegistration)
+        # plt.show()
+    
+    p = sum(P)
+    
+    return (p, currentRegistration)
+
+
+def Taylor08(target, base, deformType, window, scale, dConstraints):
+
+    deformType = deformType.lower()
 
     # Set Newton Step
     if len(dConstraints) == 0:
@@ -17,15 +182,19 @@ def Taylor08(target, base, deformType, window, dConstraints):
         NewtonStep = TaylorNSConstrained
 
     # Get Coefficients describing convex apporixmation of MS metric
-    (Ax, Ay, Iz, b, C) = getConstraintCoeffs(target, base, window, deformType)
+    (Ax, Ay, Iz, b, C) = getConstraintCoeffs(target, base, window, scale, deformType)
 
     # Set transform to 0
     if deformType == 'gaussian':
         p = np.zeros(38)
-    elif deformType == 'firstOrder':
+    elif deformType == 'thinplate':
+        p = np.zeros(38)
+    elif deformType == 'firstorder':
         p = np.zeros(6)
-    elif deformType == 'secondOrder':
+    elif deformType == 'secondorder':
         p = np.zeros(12)
+    elif deformType == 'thirdorder':
+        p = np.zeros(20)
     else:# default to second order
         p = np.zeros(12)
 
@@ -51,7 +220,7 @@ def Taylor08(target, base, deformType, window, dConstraints):
         p = pStar
         z = zStar
         gap = M/t
-        print('Current gap:', gap, '\n\n')
+        # print('Current gap:', gap, '\n\n')
         if gap <= eps:
             break
         t = mu*t
@@ -59,14 +228,29 @@ def Taylor08(target, base, deformType, window, dConstraints):
     return (p, z)
 
 
-def getConstraintCoeffs(target, base, window, deformType):
+def getConstraintCoeffs(target, base, window, scale, deformType):
     """getConstraintCoeffs(TARGET, BASE, WINDOW, DEFORM_TYPE)
         returns (Ax, Ay, Iz, b, C) paremeters defining lower
         convex hull contraints (Ax, Ay, Iz, b) between TARGET
         wrt BASE, and deformation basis vectors C dependent on DEFORM_TYPE
     """
+
+    deformType = deformType.lower()
+
+    deformDictionary = {'gaussian': gaussianD, 
+                        'thinplate': thinPlateD,
+                        'firstorder': firstOrderD,
+                        'secondorder': secondOrderD,
+                        'thirdorder': thirdOrderD}
+
+    deform = deformDictionary[deformType]
+
     start = time.time()
-    print("Getting Coefficients...")
+    # print("Getting Coefficients...")
+
+    stepSize = 2
+    if window <= 5:
+        stepSize = 1
 
     (rows, cols, _) = target.shape
     # initializing coefficient matrices & vectors
@@ -77,9 +261,21 @@ def getConstraintCoeffs(target, base, window, deformType):
     C = []
     numFacets = []
 
-    if deformType == 'gaussian':
+    dParams = scale
+
+    if (deformType == 'gaussian') or (deformType == 'thinplate'):
+
+        dParams = []
+
         kernels = getKernels((rows, cols), 4)
-        sigma = 10
+        dParams.append(kernels)
+
+        if deformType == 'gaussian':
+            sigma = 10
+            dParams.append(sigma)
+
+        dParams.append(scale)
+    
 
     for y in range(rows):
         for x in range(cols):
@@ -90,8 +286,9 @@ def getConstraintCoeffs(target, base, window, deformType):
             """ for some predefined window, construct lower convex hull
             of error function between target[x,y] and base[x,y]
             """
-            for i in range(-window, window):
-                for j in range(-window, window):
+
+            for i in range(-window, window, stepSize):
+                for j in range(-window, window, stepSize):
                     if ((y + i) < rows and (y + i) >= 0 and (x+j) < cols and (x+j) >= 0): # check range
                     # try:
                         error = np.linalg.norm(target[y,x] - base[y + i, x + j], 3) ** 2
@@ -99,38 +296,39 @@ def getConstraintCoeffs(target, base, window, deformType):
                     # except IndexError:
                     #     pass
                     # else:
-                      # errorSurface.append([i, j, 255**2])
+                    #   errorSurface.append([i, j, 0])
                         
 
             errorSurface = np.array(errorSurface)
 
-            # # Degenerate Hull Case: (typical for homogeneous region)
+            # Degenerate Hull Case: (typical for homogeneous region)
+            if len(np.unique(errorSurface.T[2])) == 1:
             # if np.std(errorSurface.T[2]) < 10:
-            #     Ax1 = [0]
-            #     Ay1 = [0]
-            #     b.append(0)
+                Ax1 = [0]
+                Ay1 = [0]
+                b.append(0)
 
-            # else:
-            if (x,y) == (50, 50):
-                plotLowerHull(errorSurface, 1)
+            else:
+                # if (x,y) == (50, 50):
+                    # plotLowerHull(errorSurface, 1)
 
-            # hull = ConvexHull(points = errorSurface) # this has issues in homogeneous regions
-            hull = ConvexHull(points = errorSurface, qhull_options='QJ') # Solves above issue
-            # Initialize facet constraint lists
-            Ax1 = []
-            Ay1 = []
-            # Get lower planar facet coefficients
-            for i in range(len(hull.simplices)):
-                if hull.equations[i][2] < 0:
-                    ax = hull.equations[i][1]
-                    ay = hull.equations[i][0]
-                    # az = hull.equations[i][2]
-                    dist = hull.equations[i][3]
-            
-                    Ax1.append(ax)
-                    Ay1.append(ay)
-                    # Iz1.append(1)
-                    b.append(dist)
+                # hull = ConvexHull(points = errorSurface) # this has issues in homogeneous regions
+                hull = ConvexHull(points = errorSurface, qhull_options='QJ') # Solves above issue
+                # Initialize facet constraint lists
+                Ax1 = []
+                Ay1 = []
+                # Get lower planar facet coefficients
+                for i in range(len(hull.simplices)):
+                    if hull.equations[i][2] < 0:
+                        ax = hull.equations[i][1]
+                        ay = hull.equations[i][0]
+                        # az = hull.equations[i][2]
+                        dist = -1*hull.equations[i][3]
+                
+                        Ax1.append(ax)
+                        Ay1.append(ay)
+                        # Iz1.append(1)
+                        b.append(dist)
 
             facets = len(Ax1)
             numFacets.append(facets)
@@ -138,18 +336,24 @@ def getConstraintCoeffs(target, base, window, deformType):
             Ay = np.append(Ay, Ay1)
             Iz = np.append(Iz, np.ones(facets))
 
-            if deformType == 'gaussian':
-                C.append(gaussianD((x,y), kernels, sigma))
-            elif deformType == 'firstOrder':
-                C.append(firstOrderD((x,y)))
-            elif deformType == 'secondOrder':
-                C.append(secondOrderD((x,y)))
-            else: 
-                C.append(secondOrderD((x,y)))
+            C.append( deform((x,y), dParams) )
 
-    print("Done. Time elapsed:", time.time() - start, " \n\n")
+            # if deformType == 'gaussian':
+            #     C.append(gaussianD((x,y), kernels, sigma, scale))
+            # elif deformType == 'thinplate':
+            #     C.append(thinPlateD((x,y), kernels, scale)) 
+            # elif deformType == 'firstorder':
+            #     C.append(firstOrderD((x,y), scale))
+            # elif deformType == 'secondorder':
+            #     C.append(secondOrderD((x,y), scale))
+            # elif deformType == 'thirdorder':
+            #     C.append(thirdOrderD((x,y), scale))
+            # else: 
+            #     C.append(secondOrderD((x,y), scale))
 
-    print("Formatting Matrices...")
+    # print("Done. Time elapsed:", time.time() - start, " \n\n")
+
+    # print("Formatting Matrices...")
     
     Ax = coeffMatFormat(Ax, numFacets)
     Ay = coeffMatFormat(Ay, numFacets)
@@ -158,7 +362,7 @@ def getConstraintCoeffs(target, base, window, deformType):
 
     C = np.array(C)
 
-    print("Done. Total Time Elapsed: ", time.time() - start, "\n\n")
+    # print("Done. Total Time Elapsed: ", time.time() - start, "\n\n")
 
     return (Ax, Ay, Iz, b, C)
 
@@ -252,6 +456,12 @@ def TaylorNSConstrained(facetCoeffs, p, z, t, constraints):
     """
     (Ax, Ay, Iz, b, C) = facetCoeffs
     (lbX, ubX, lbY, ubY) = constraints
+
+    lbX = lbX * np.ones(len(z))
+    ubX = ubX * np.ones(len(z))
+    lbY = lbY * np.ones(len(z))
+    ubX = ubX * np.ones(len(z))
+
     c = t*np.ones(Iz.shape[1])
     
     # Length of px and py vectors:
@@ -350,51 +560,6 @@ def coeffMatFormat(A, numFacets):
     
     return sparse.csc_matrix((A, (row, col)), shape = (len(A), len(numFacets)))
 
-
-# CALCULATES HESSIAN OF BARRIER OBJECTIVE
-def getHessians(Ax, Ay, Iz, C, d): # old
-
-    # Pls review Multivariate Calculus. All these signs should be good now.
-    # D1 = Ax.T @ d @ Ax
-    # D2 = Ax.T @ d @ Ay
-    # D3 = Ay.T @ d @ Ay
-    # D4 = -1 * Ax.T @ d @ Iz
-    # D5 = -1 * Ay.T @ d @ Iz
-    D6 = Iz.T @ d @ Iz
-
-    # # Constructs Hp
-    # Hpx   = C.T @ D1 @ C
-    # Hpxpy = C.T @ D2 @ C
-    # Hpy   = C.T @ D3 @ C
-
-    Hpx = C.T @ Ax.T @ d @ Ax @ C
-    Hpxpy = C.T @ Ax.T @ d @ Ay @ C
-    Hpy = C.T @ Ay.T @ d @ Ay @ C
-
-    Hp1 = np.concatenate((Hpx, Hpxpy), axis = 1)
-    Hp2 = np.concatenate((Hpxpy, Hpy), axis = 1)
-    Hp  = np.concatenate((Hp1, Hp2),   axis = 0)
-
-    # Constructs Hz
-    # Hz1 = D4 @ C
-    # Hz2 = D5 @ C
-    Hz1 = -1 * Ax.T @ d @ Iz @ C
-    Hz2 = -1 * Ay.T @ d @ Iz @ C
-    Hz  = np.concatenate((Hz1, Hz2), axis = 1)
-
-    return (Hp, Hz, D6) 
-
-
-# CALCULATES GRADIENT OF BARRIER OBJECTIVE
-def getGradients(Ax, Ay, Iz, C, s, t): #old
-    """ Returns Gradients of barrier functions wrt p and z"""
-
-    gz =  t - (Iz.T @ s**(-1))
-    gpx =  C.T @ Ax.T @ s**(-1)
-    gpy =  C.T @ Ay.T @ s**(-1)
-    gp = np.concatenate((gpx, gpy), axis = 0)
-
-    return (gp, gz)
 
 # Fullsweep of Gradients and Hessians Necessary to compute unonstrained Newton Step
 def unconstrainedDerivatives(facetCoeffs, px, py, z, t):
@@ -507,7 +672,52 @@ def constrainedDerivatives(facetCoeffs, px, py, z, lbX, ubX, lbY, ubY, t):
 
     return (gp, gz, Hp, Hz, D6)
 
+# CALCULATES HESSIAN OF BARRIER OBJECTIVE
+def getHessians(Ax, Ay, Iz, C, d): # old
 
+    # Pls review Multivariate Calculus. All these signs should be good now.
+    # D1 = Ax.T @ d @ Ax
+    # D2 = Ax.T @ d @ Ay
+    # D3 = Ay.T @ d @ Ay
+    # D4 = -1 * Ax.T @ d @ Iz
+    # D5 = -1 * Ay.T @ d @ Iz
+    D6 = Iz.T @ d @ Iz
+
+    # # Constructs Hp
+    # Hpx   = C.T @ D1 @ C
+    # Hpxpy = C.T @ D2 @ C
+    # Hpy   = C.T @ D3 @ C
+
+    Hpx = C.T @ Ax.T @ d @ Ax @ C
+    Hpxpy = C.T @ Ax.T @ d @ Ay @ C
+    Hpy = C.T @ Ay.T @ d @ Ay @ C
+
+    Hp1 = np.concatenate((Hpx, Hpxpy), axis = 1)
+    Hp2 = np.concatenate((Hpxpy, Hpy), axis = 1)
+    Hp  = np.concatenate((Hp1, Hp2),   axis = 0)
+
+    # Constructs Hz
+    # Hz1 = D4 @ C
+    # Hz2 = D5 @ C
+    Hz1 = -1 * Ax.T @ d @ Iz @ C
+    Hz2 = -1 * Ay.T @ d @ Iz @ C
+    Hz  = np.concatenate((Hz1, Hz2), axis = 1)
+
+    return (Hp, Hz, D6) 
+
+
+# CALCULATES GRADIENT OF BARRIER OBJECTIVE
+def getGradients(Ax, Ay, Iz, C, s, t): #old
+    """ Returns Gradients of barrier functions wrt p and z"""
+
+    gz =  t - (Iz.T @ s**(-1))
+    gpx =  C.T @ Ax.T @ s**(-1)
+    gpy =  C.T @ Ay.T @ s**(-1)
+    gp = np.concatenate((gpx, gpy), axis = 0)
+
+    return (gp, gz)
+
+    
 def main():
 
     target = readImage('images/BrainT1SliceR10X13Y17.png', (50,50))

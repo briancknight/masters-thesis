@@ -56,6 +56,7 @@ def plotLowerHull(pts, scatterFlag):
 	B = []
 	constraints = []
 	lowerFacets = []
+
 	for i in range(len(hull.simplices)):
 		lowerFacets = np.append(lowerFacets, i)
 		s = hull.simplices[i]
@@ -72,8 +73,6 @@ def plotLowerHull(pts, scatterFlag):
 	# Make axis label
 	for i in ["x", "y", "z"]:
 	    eval("ax.set_{:s}label('{:s}')".format(i, i))
-
-
 
 	plt.show()
 
@@ -97,36 +96,42 @@ def generateExampleFigures():
 	target = readImage('images/BrainT1SliceR10X13Y17.png')
 
 	# Example of feature region
-	(x, y) = (100, 130)
+	(x, y) = (125, 110)
 
 	pts = []
+	pts2 = np.zeros((20, 20))
 	for i in range(-12, 12):
-		for j in range(-10, 10):
+		for j in range(-12, 12):
 
 			pts.append([i, j, np.linalg.norm(target[y,x] - base[y+i,x+j], 3)**2])
-
+			pts2[i,j] = np.linalg.norm(target[y,x] - base[y+i,x+j], 3)**2
 	pts = np.array(pts)
 
 	plotl2Scatter(pts)
 	plotLowerHull(pts, 1)
 	plotLowerHull(pts, 0)
-
+	plt.imshow(pts2, cmap = 'hot')
+	plt.show()
+	# plt.colorbar()
 
 	# Example of homogeneous region
 	(x, y) = (150, 75)
 
 	pts = []
-	for i in range(-10, 10):
+	pts2 = np.zeros((20, 20))
+
+	for i in range(-12, 12):
 		for j in range(-12, 12):
 
 			pts.append([i, j, np.linalg.norm(target[y,x] - base[y+i,x+j], 3)**2])
-
+			pts2[i,j] = np.linalg.norm(target[y,x] - base[y+i,x+j], 3)**2
 	pts = np.array(pts)
 
 	plotl2Scatter(pts)
 	plotLowerHull(pts, 1)
 	plotLowerHull(pts, 0)
-
+	plt.imshow(pts2, cmap = 'hot')
+	plt.show()
 
 def main():
 	

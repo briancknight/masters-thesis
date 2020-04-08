@@ -50,3 +50,12 @@ def readImage(filename, *args):
 
 
 
+def downSample(im, k):
+	
+    (rows, cols, _) = im.shape
+    dsRows = int(np.floor(rows/k))
+    dsCols = int(np.floor(cols/k))
+    
+    pilIm = Image.fromarray(np.uint8(im))
+    
+    return np.array(pilIm.resize((dsCols, dsRows), resample=Image.BILINEAR))
