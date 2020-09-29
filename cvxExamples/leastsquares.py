@@ -1,6 +1,6 @@
 import cvxpy as cvx
 import numpy as np
-
+import cvxopt
 
 def leastsquares(A, b, *args):
 
@@ -27,7 +27,7 @@ def leastsquares(A, b, *args):
 
 	objective = cvx.Minimize(cvx.atoms.norm(A*x - b))
 	prob = cvx.Problem(objective, constraints)
-	result = prob.solve()
+	result = prob.solve(solver=cvx.CVXOPT)
 
 	return (x.value, result)
 
@@ -51,8 +51,9 @@ def main():
 	c = np.random.randint(-100, 100, 100)
 	b = np.random.randint(-100, 100, 50)
 	
-	(x, p) = leastsquares(A, b, [np.zeros(len(c))])
+	(x, p) = leastsquares(A, b, [np.zeros(len(c)), np.ones(len(c))])
 
+	print(x, p)
 
 if __name__ == '__main__':
 	main()

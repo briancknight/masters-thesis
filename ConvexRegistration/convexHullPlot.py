@@ -135,8 +135,44 @@ def generateExampleFigures():
 
 def main():
 	
-	generateExampleFigures()
+	# generateExampleFigures()
+	ptCloud = np.random.rand(10, 2)
+	hull = ConvexHull(ptCloud)
+
+	fig = plt.figure()
+
+	plt.plot(ptCloud[:,0], ptCloud[:,1], 'o')
+
+	plt.show()
+
+	plt.plot(ptCloud[:,0], ptCloud[:,1], 'o')
+
+	for i in range(len(hull.simplices)):
+			s = hull.simplices[i]
+			if hull.equations[i][1] < 0:
+				a = hull.equations[i][:2]
+				b = hull.equations[i][2]
+				s = np.append(s, s[0])
 
 
+				plt.plot(hull.points[s].T[0], hull.points[s].T[1], "bo")
+				plt.plot(hull.points[s, 0], hull.points[s, 1], 'g-')
+
+	plt.show()
+
+	plt.plot(ptCloud[:,0], ptCloud[:,1], 'o')
+	
+	for i in range(len(hull.simplices)):
+			s = hull.simplices[i]
+			# if hull.equations[i][1] < 0:
+			a = hull.equations[i][:2]
+			b = hull.equations[i][2]
+			s = np.append(s, s[0])
+
+
+			plt.plot(hull.points[s].T[0], hull.points[s].T[1], "bo")
+			plt.plot(hull.points[s, 0], hull.points[s, 1], 'r-')
+
+	plt.show()
 if __name__ == '__main__':
 	main()

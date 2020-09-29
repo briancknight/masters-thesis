@@ -1,0 +1,14 @@
+Current Deformation Parameters:  [1.26280067e+01 9.79128429e-04 1.26537935e-03 1.43054451e+01
+ 5.61874421e-03 1.16099051e-02] 
+
+
+Total Time elapsed:  20.28310271501541  minutes
+
+
+Deformation Coefficients:  [1.26280067e+01 9.79128429e-04 1.26537935e-03 1.43054451e+01
+ 5.61874421e-03 1.16099051e-02] 
+
+
+Registration Parameters:  (30, 3, [], 'firstOrder') 
+
+
